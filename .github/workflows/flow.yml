@@ -1,0 +1,77 @@
+name: CI/CD Pipeline with Rollback Strategy
+
+on:
+  push:
+    branches:
+      - main  # Trigger deployment only on pushes to main branch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js (or your environment)
+        uses: actions/setup-node@v3
+        with:
+          node-version: '14'
+
+      - name: Install dependencies
+        run: |
+          npm install
+
+      - name: Run tests
+        run: |
+          npm test
+
+  deploy:
+    needs: build  # Ensure deployment runs after the build job
+    runs-on: ubuntu-latest
+    environment: production  # You can specify environments (like staging, production)
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: SSH Creds
+        uses: appleboy/ssh-action@v0.1.5
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_PASSWORD }}
+
+      - name: Deploy application (deployment step)
+        id: deploy
+        run: |
+          echo "Deploying to production..."
+          # Here, add your actual deployment commands like:
+          # aws ecs update-service --cluster my-cluster --service my-service --desired-count 1
+
+      - name: Save deployment state (version/commit)
+        id: save-state
+        run: |
+          echo "last_successful_commit=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+  rollback:
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: failure()  # ${{ needs.deploy.result == 'failure' }} This job will only run if deployment fails
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Rollback deployment (if deployment failed)
+        run: |
+          echo "Rollback: Reverting to the last successful commit"
+          git reset --hard ${{ env.last_successful_commit }}
+          # Revert the deployment (example for AWS)
+          # aws ecs update-service --cluster my-cluster --service my-service --desired-count 0
+          # Here, you would rollback the service to the previous working version, 
+          # either by updating to a prior version or by redeploying the successful commit.
+          
+          echo "Rollback complete. Re-deploying the last successful version."
+
+          # You can then redeploy this commit (for example, in AWS):
+          # aws ecs update-service --cluster my-cluster --service my-service --desired-count 1
+
